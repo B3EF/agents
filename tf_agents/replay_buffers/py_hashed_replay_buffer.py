@@ -24,6 +24,8 @@ from __future__ import division
 from __future__ import print_function
 
 import pickle
+import io
+import builtins
 import threading
 
 from absl import logging
@@ -33,6 +35,27 @@ import tensorflow as tf  # pylint: disable=g-explicit-tensorflow-version-import
 from tf_agents.replay_buffers import py_uniform_replay_buffer
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import trajectory
+safe_builtins = {
+    'range',
+    'complex',
+    'set',
+    'frozenset',
+    'slice',
+}
+
+class RestrictedUnpickler(pickle.Unpickler):
+
+    def find_class(self, module, name):
+        """Only allow safe classes from builtins"""
+        if module == "builtins" and name in safe_builtins:
+            return getattr(builtins, name)
+        """Forbid everything else"""
+        raise pickle.UnpicklingError("global '%s.%s' is forbidden" %
+                                     (module, name))
+
+def restricted_loads(s):
+    """Helper function analogous to pickle.loads()"""
+    return RestrictedUnpickler(io.BytesIO(s)).load()
 
 
 class FrameBuffer(tf.train.experimental.PythonState):
@@ -70,6 +93,7 @@ class FrameBuffer(tf.train.experimental.PythonState):
 
   def deserialize(self, string_value):
     """Callback for `PythonStateWrapper` to deserialize the array."""
+    restricted_loads(string_value)
     self._frames = pickle.loads(string_value)
 
   def compress(self, observation, split_axis=-1):
